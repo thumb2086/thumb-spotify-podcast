@@ -47,12 +47,13 @@ class UserEndpoint {
 
   fun savedShows({ offset: int, limit: int }) {
     return client.show.savedShows(offset: offset, limit: limit).then((data){
+      var shows = data["items"].map((item) => item["show"]).toList()
       return Converters.paginated(
         {
           limit: data["limit"],
           offset: data["offset"],
           total: data["total"],
-          items: data["items"]
+          items: shows
         },
         (items) => Converters.simpleShows(items)
       )
