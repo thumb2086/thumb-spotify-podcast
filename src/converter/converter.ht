@@ -271,7 +271,7 @@ class Converters {
         releaseDatePrecision: "day",
         artists: [],
         images: images,
-        albumType: "podcast",
+        albumType: "compilation",
         totalTracks: show["total_episodes"] ?? 0,
         recordLabel: publisherName,
         genres: [],
@@ -338,7 +338,7 @@ class Converters {
           releaseDate: Converters.extractDate(episode["release_date"] ?? episode["releaseDate"]),
           releaseDatePrecision: "day",
           images: showImages.isEmpty ? episodeImages : showImages,
-          albumType: "podcast",
+          albumType: "compilation",
         }.toJson(),
         // 供 podcast 音源使用（Show→Album、Episode→Track 映射的自訂欄位）
         showName: showName,

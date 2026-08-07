@@ -1,4 +1,5 @@
 import { SpotifyGqlApi } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
+import { SpotifyError } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/error.ht'
 import { Converters } from '../converter/converter.ht'
 
 class SearchEndpoint {
@@ -6,58 +7,117 @@ class SearchEndpoint {
 
   construct (this.client)
 
-  get chips -> List { // Set<string>
-    return ["episodes", "shows"]
+  get chips -> List {
+    return ["all", "albums", "tracks"]
   }
 
   fun all(query: string) {
-    return client.search.shows(query, limit: 20).then((showsData) {
-      return client.search.episodes(query, limit: 20).then((episodesData) {
-        return {
-          tracks: [],
-          albums: [],
-          artists: [],
-          playlists: [],
-          episodes: Converters.fullEpisodes(episodesData["items"]),
-          shows: Converters.simpleShows(showsData["items"]),
-        }.toJson()
-      })
+    return client.gqlClient.post(
+      "",
+      data: {
+        "variables": {
+          "searchTerm": query,
+          "offset": 0,
+          "limit": 20,
+          "numberOfTopResults": 5,
+          "includeAudiobooks": true,
+          "includePreReleases": false,
+          "includeAlbumPreReleases": false,
+          "includeAuthors": false,
+          "includeEpisodeContentRatingsV2": false,
+        },
+        "operationName": "searchDesktop",
+        "extensions": {
+          "persistedQuery": {
+            "version": 1,
+            "sha256Hash": "eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0"
+          }
+        }
+      }.toJson()
+    ).then((res) {
+      var data = res.data
+
+      if(SpotifyError.isError(data)) {
+        throw SpotifyError(data)
+      }
+
+      var searchV2 = data["data"]["searchV2"]
+
+      var podcastItems = (searchV2["podcasts"]?["items"] ?? [])
+        .where((item) => item["data"] != null)
+        .map((item) {
+          var show = item["data"]
+          var uri = show["uri"]
+          var id = show["id"]
+          if(id == null && uri != null) id = uri.toString().split(":").last
+          var publisher = show["publisher"]
+          var publisherName = ""
+          if(publisher is Map) {
+            var np = publisher["name"]
+            if(np != null) publisherName = np.toString()
+          } else if(publisher != null) {
+            publisherName = publisher.toString()
+          }
+          var coverArt = show["coverArt"]
+          var images = []
+          if(coverArt is Map && coverArt["sources"] is List) images = coverArt["sources"]
+
+          return {
+            id: id,
+            name: show["name"],
+            externalUri: "https://open.spotify.com/show/${id}",
+            artists: [],
+            images: images,
+            albumType: "compilation",
+            releaseDate: "",
+          }.toJson()
+        })
+        .toList()
+
+      var trackItems = (searchV2["episodes"]?["items"] ?? [])
+        .where((item) => item["data"] != null)
+        .map((item) {
+          var episode = item["data"]
+          var uri = episode["uri"]
+          var id = episode["id"]
+          if(id == null && uri != null) id = uri.toString().split(":").last
+          var duration = episode["duration"]
+          var durationMs = 0
+          if(duration is Map) durationMs = duration["totalMilliseconds"] ?? 0
+          var coverArt = episode["coverArt"]
+          var images = []
+          if(coverArt is Map && coverArt["sources"] is List) images = coverArt["sources"]
+
+          return {
+            id: id,
+            name: episode["name"],
+            externalUri: "https://open.spotify.com/episode/${id}",
+            artists: [],
+            album: {
+              id: "",
+              name: "",
+              externalUri: "",
+              artists: [],
+              images: images,
+              albumType: "compilation",
+            }.toJson(),
+            durationMs: durationMs,
+            isrc: "",
+            explicit: false,
+          }.toJson()
+        })
+        .toList()
+
+      return {
+        albums: podcastItems,
+        tracks: trackItems,
+        artists: [],
+        playlists: [],
+      }.toJson()
     })
   }
 
   fun albums(query: string, {offset: int, limit: int}) {
-    return client.search.albums(
-      query,
-      offset: offset,
-      limit: limit
-    ).then((data) => Converters.paginated(data, (items) => Converters.simpleAlbums(items)))
-  }
-
-  fun artists(query: string, {offset: int, limit: int}) {
-    return client.search.artists(
-      query,
-      offset: offset,
-      limit: limit
-    ).then((data) => Converters.paginated(data, (items) => Converters.simpleArtists(items)))
-  }
-
-  fun tracks(query: string, {offset: int, limit: int}) {
-    return client.search.tracks(
-      query,
-      offset: offset,
-      limit: limit
-    ).then((data) => Converters.paginated(data, (items) => Converters.fullTracks(items)))
-  }
-
-  fun playlists(query: string, {offset: int, limit: int}) {
-    return client.search.playlists(
-      query,
-      offset: offset,
-      limit: limit
-    ).then((data) => Converters.paginated(data, (items) => Converters.simplePlaylistsFromLibraryV3(items)))
-  }
-
-  fun shows(query: string, {offset: int, limit: int}) {
     return client.search.shows(
       query,
       offset: offset,
@@ -65,12 +125,36 @@ class SearchEndpoint {
     ).then((data) => Converters.paginated(data, (items) => Converters.simpleShows(items)))
   }
 
-  fun episodes(query: string, {offset: int, limit: int}) {
+  fun artists(query: string, {offset: int, limit: int}) {
+    var emptyResult = {
+      total: 0,
+      limit: limit ?? 20,
+      offset: offset ?? 0,
+      hasMore: false,
+      nextOffset: null,
+      items: [],
+    }.toJson()
+    return emptyResult
+  }
+
+  fun tracks(query: string, {offset: int, limit: int}) {
     return client.search.episodes(
       query,
       offset: offset,
       limit: limit
     ).then((data) => Converters.paginated(data, (items) => Converters.fullEpisodes(items)))
+  }
+
+  fun playlists(query: string, {offset: int, limit: int}) {
+    var emptyResult = {
+      total: 0,
+      limit: limit ?? 20,
+      offset: offset ?? 0,
+      hasMore: false,
+      nextOffset: null,
+      items: [],
+    }.toJson()
+    return emptyResult
   }
 }
 
