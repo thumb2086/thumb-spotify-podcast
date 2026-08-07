@@ -25,9 +25,6 @@ class BrowseEndpoint {
           hasMore: false,
           total: sections.length,
           items: sections.map((section) {            
-            var playlists = section["items"].where((item) => item["objectType"] == "Playlist").toList()
-            var albums = section["items"].where((item) => item["objectType"] == "Album").toList()
-            var artists = section["items"].where((item) => item["objectType"] == "Artist").toList()
             var shows = section["items"].where((item) => item["objectType"] == "Show" || item["objectType"] == "Podcast").toList()
             
             return {
@@ -36,9 +33,6 @@ class BrowseEndpoint {
               externalUri: section["external_urls"]["spotify"] ?? "https://open.spotify.com/section/${section["id"]}",
               browseMore: true,
               items: [
-                ...Converters.simplePlaylistsFromLibraryV3(playlists),
-                ...Converters.simpleAlbums(albums),
-                ...Converters.fullArtists(artists),
                 ...Converters.simpleShows(shows),
               ],
             }.toJson()
@@ -60,15 +54,9 @@ class BrowseEndpoint {
         return Converters.paginated(
           section,
           (items) {
-            var playlists = section["items"].where((item) => item["objectType"] == "Playlist").toList()
-            var albums = section["items"].where((item) => item["objectType"] == "Album").toList()
-            var artists = section["items"].where((item) => item["objectType"] == "Artist").toList()
             var shows = section["items"].where((item) => item["objectType"] == "Show" || item["objectType"] == "Podcast").toList()
 
             return [
-                ...Converters.simplePlaylistsFromLibraryV3(playlists),
-                ...Converters.simpleAlbums(albums),
-                ...Converters.fullArtists(artists),
                 ...Converters.simpleShows(shows),
               ]
           }

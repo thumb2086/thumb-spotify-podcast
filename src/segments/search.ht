@@ -8,22 +8,22 @@ class SearchEndpoint {
 
   get chips -> List { // Set<string>
     // can be tracks, playlists, artists, albums, shows, episodes and all
-    return ["all", "tracks", "albums", "artists", "playlists", "episodes", "shows"]
+    // podcast-only: 只保留 shows / episodes
+    return ["all", "episodes", "shows"]
   }
 
   fun all(query: string) {
-    return client.search.all(
-      query,
-      limit: 20
-    ).then((data){
-      var result = {
-        artists: Converters.simpleArtists(data["artists"]),
-        albums: Converters.simpleAlbums(data["albums"]),
-        tracks: Converters.fullTracks(data["tracks"]),
-        playlists: Converters.simplePlaylistsFromLibraryV3(data["playlists"]),
-      }.toJson()
-
-      return result
+    return client.search.shows(query, limit: 20).then((showsData) {
+      return client.search.episodes(query, limit: 20).then((episodesData) {
+        return {
+          tracks: [],
+          albums: [],
+          artists: [],
+          playlists: [],
+          episodes: Converters.fullEpisodes(episodesData["items"]),
+          shows: Converters.simpleShows(showsData["items"]),
+        }.toJson()
+      })
     })
   }
 
