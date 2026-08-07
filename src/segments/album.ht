@@ -7,14 +7,14 @@ class AlbumEndpoint {
   construct (this.client)
 
   fun getAlbum(id: string) {
-    return client.album.getAlbum(id).then((album) {
-      return Converters.fullAlbums([album])[0]
+    return client.show.getShow(id).then((show) {
+      return Converters.simpleShows([show])[0]
     })
   }
 
   fun tracks(id: string, {offset: int, limit: int}) {
-    return client.album.tracks(id, offset: offset, limit: limit).then((data) {
-      return Converters.paginated(data, (items) => Converters.fullTracks(items))
+    return client.show.episodes(id, offset: offset, limit: limit).then((data) {
+      return Converters.paginated(data, (items) => Converters.fullEpisodes(items))
     })
   }
 
@@ -25,10 +25,12 @@ class AlbumEndpoint {
   }
 
   fun save(albumIds: List) {
-    return client.album.save(albumIds)
+    return client.show.saveShows(albumIds)
   }
 
   fun unsave(albumIds: List) {
-    return client.album.unsave(albumIds)
+    return client.show.unsaveShows(albumIds)
   }
 }
+
+export { AlbumEndpoint }
