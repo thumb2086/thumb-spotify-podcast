@@ -38,7 +38,7 @@ class CorePlugin {
     var patch = int.parse(versionParts[2])
 
     return client.get_req(
-      "https://api.github.com/repos/sonic-liberation/spotube-plugin-spotify/releases/latest",
+      "https://api.github.com/repos/thumb2086/thumb-spotify-podcast/releases/latest",
       options: RequestOptions(
         headers: {
           "Accept": "application/vnd.github.v3+json"

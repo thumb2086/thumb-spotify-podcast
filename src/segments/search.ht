@@ -7,8 +7,8 @@ class SearchEndpoint {
   construct (this.client)
 
   get chips -> List { // Set<string>
-    // can be tracks, playlists, artists, albums and all
-    return ["all", "tracks", "albums", "artists", "playlists"]
+    // can be tracks, playlists, artists, albums, shows, episodes and all
+    return ["all", "tracks", "albums", "artists", "playlists", "episodes", "shows"]
   }
 
   fun all(query: string) {
@@ -57,6 +57,22 @@ class SearchEndpoint {
       offset: offset,
       limit: limit
     ).then((data) => Converters.paginated(data, (items) => Converters.simplePlaylistsFromLibraryV3(items)))
+  }
+
+  fun shows(query: string, {offset: int, limit: int}) {
+    return client.search.shows(
+      query,
+      offset: offset,
+      limit: limit
+    ).then((data) => Converters.paginated(data, (items) => Converters.simpleShows(items)))
+  }
+
+  fun episodes(query: string, {offset: int, limit: int}) {
+    return client.search.episodes(
+      query,
+      offset: offset,
+      limit: limit
+    ).then((data) => Converters.paginated(data, (items) => Converters.fullEpisodes(items)))
   }
 }
 

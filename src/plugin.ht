@@ -3,11 +3,14 @@ import "module:spotube_plugin" as spotube
 import { SpotifyGqlApi } from '../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
 
 import { SpotifyAuthEndpoint } from './segments/auth.ht'
+import { PodcastAudioSourceEndpoint } from "./segments/audio_source.ht"
 import { AlbumEndpoint } from "./segments/album.ht"
 import { ArtistEndpoint } from "./segments/artist.ht"
 import { BrowseEndpoint } from "./segments/browse.ht"
+import { EpisodeEndpoint } from "./segments/episode.ht"
 import { PlaylistEndpoint } from './segments/playlist.ht'
 import { SearchEndpoint } from './segments/search.ht'
+import { ShowEndpoint } from './segments/show.ht'
 import { TrackEndpoint } from './segments/track.ht'
 import { UserEndpoint } from './segments/user.ht'
 import { CorePlugin } from './segments/core.ht'
@@ -18,12 +21,15 @@ var HttpClient = std.HttpClient
 class SpotifyMetadataProviderPlugin {
   var auth: SpotifyAuthEndpoint
   var api: SpotifyGqlApi
+  var audioSource: PodcastAudioSourceEndpoint
 
   var album: AlbumEndpoint
   var artist: ArtistEndpoint
   var browse: BrowseEndpoint
+  var episode: EpisodeEndpoint
   var playlist: PlaylistEndpoint
   var search: SearchEndpoint
+  var show: ShowEndpoint
   var track: TrackEndpoint
   var user: UserEndpoint
   var core: CorePlugin
@@ -31,12 +37,15 @@ class SpotifyMetadataProviderPlugin {
   construct (){
     api = SpotifyGqlApi()
     auth = SpotifyAuthEndpoint()
+    audioSource = PodcastAudioSourceEndpoint()
 
     album = AlbumEndpoint(api)
     artist = ArtistEndpoint(api)
     browse = BrowseEndpoint(api, auth)
+    episode = EpisodeEndpoint(api)
     playlist = PlaylistEndpoint(api)
     search = SearchEndpoint(api)
+    show = ShowEndpoint(api)
     track = TrackEndpoint(api)
     user = UserEndpoint(api)
     core = CorePlugin()

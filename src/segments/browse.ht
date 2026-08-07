@@ -28,6 +28,7 @@ class BrowseEndpoint {
             var playlists = section["items"].where((item) => item["objectType"] == "Playlist").toList()
             var albums = section["items"].where((item) => item["objectType"] == "Album").toList()
             var artists = section["items"].where((item) => item["objectType"] == "Artist").toList()
+            var shows = section["items"].where((item) => item["objectType"] == "Show" || item["objectType"] == "Podcast").toList()
             
             return {
               id: section["id"],
@@ -38,6 +39,7 @@ class BrowseEndpoint {
                 ...Converters.simplePlaylistsFromLibraryV3(playlists),
                 ...Converters.simpleAlbums(albums),
                 ...Converters.fullArtists(artists),
+                ...Converters.simpleShows(shows),
               ],
             }.toJson()
           }).toList()
@@ -61,11 +63,13 @@ class BrowseEndpoint {
             var playlists = section["items"].where((item) => item["objectType"] == "Playlist").toList()
             var albums = section["items"].where((item) => item["objectType"] == "Album").toList()
             var artists = section["items"].where((item) => item["objectType"] == "Artist").toList()
+            var shows = section["items"].where((item) => item["objectType"] == "Show" || item["objectType"] == "Podcast").toList()
 
             return [
                 ...Converters.simplePlaylistsFromLibraryV3(playlists),
                 ...Converters.simpleAlbums(albums),
                 ...Converters.fullArtists(artists),
+                ...Converters.simpleShows(shows),
               ]
           }
         )

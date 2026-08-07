@@ -1,0 +1,30 @@
+import { SpotifyGqlApi } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
+import { Converters } from '../converter/converter.ht'
+
+class ShowEndpoint {
+  var client: SpotifyGqlApi
+
+  construct (this.client)
+
+  fun getShow(id: string) {
+    return client.show.getShow(id).then((data) {
+      return Converters.simpleShows([data])[0]
+    })
+  }
+
+  fun episodes(id: string, {offset: int, limit: int}) {
+    return client.show.episodes(id, offset: offset, limit: limit).then((data) {
+      return Converters.paginated(data, (items) => Converters.fullEpisodes(items))
+    })
+  }
+
+  fun save(showIds: List) {
+    return client.show.saveShows(showIds).then(() => true)
+  }
+
+  fun unsave(showIds: List) {
+    return client.show.unsaveShows(showIds).then(() => true)
+  }
+}
+
+export { ShowEndpoint }
