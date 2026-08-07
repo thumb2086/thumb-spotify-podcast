@@ -1,6 +1,10 @@
+import "module:std" as std
 import { SpotifyGqlApi } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
 import { SpotifyError } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/error.ht'
 import { Converters } from '../converter/converter.ht'
+
+var HttpClient = std.HttpClient
+var HttpResponse = std.HttpResponse
 
 class SearchEndpoint {
   var client: SpotifyGqlApi
