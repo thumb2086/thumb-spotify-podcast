@@ -10,6 +10,21 @@ class SearchEndpoint {
     return ["episodes", "shows"]
   }
 
+  fun all(query: string) {
+    return client.search.shows(query, limit: 20).then((showsData) {
+      return client.search.episodes(query, limit: 20).then((episodesData) {
+        return {
+          tracks: [],
+          albums: [],
+          artists: [],
+          playlists: [],
+          episodes: Converters.fullEpisodes(episodesData["items"]),
+          shows: Converters.simpleShows(showsData["items"]),
+        }.toJson()
+      })
+    })
+  }
+
   fun albums(query: string, {offset: int, limit: int}) {
     return client.search.albums(
       query,
