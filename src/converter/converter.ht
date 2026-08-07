@@ -207,18 +207,21 @@ class Converters {
         continue
       }
 
-      var id = show["id"]
+      var id = show["id"] ?? show["uri"]?.toString().split(":").last ?? ""
+      var publisher = show["publisher"]
+      var publisherName = publisher is Map ? publisher["name"] ?? "" : publisher ?? ""
+
       var showModified = {
         id: id,
         name: show["name"],
         externalUri: show["external_urls"]?["spotify"] ?? "https://open.spotify.com/show/${id}",
-        releaseDate: show["release_date"] ?? "",
+        releaseDate: show["release_date"] ?? show["releaseDate"]?["isoString"] ?? "",
         releaseDatePrecision: "day",
         artists: [],
-        images: show["images"] ?? [],
+        images: show["images"] ?? show["coverArt"]?["sources"] ?? [],
         albumType: "podcast",
         totalTracks: show["total_episodes"] ?? 0,
-        recordLabel: show["publisher"] ?? "",
+        recordLabel: publisherName,
         genres: [],
         description: show["description"] ?? "",
       }.toJson()
@@ -244,27 +247,28 @@ class Converters {
 
       var show = episode["show"]
       var showName = show?["name"]?.toString() ?? ""
+      var episodeId = episode["id"] ?? episode["uri"]?.toString().split(":").last ?? ""
 
       var modifiedEpisode = {
-        id: episode["id"],
+        id: episodeId,
         name: episode["name"],
-        externalUri: episode["external_urls"]?["spotify"] ?? "https://open.spotify.com/episode/${episode["id"]}",
+        externalUri: episode["external_urls"]?["spotify"] ?? "https://open.spotify.com/episode/${episodeId}",
         explicit: episode["explicit"] ?? false,
-        durationMs: episode["duration_ms"] ?? 0,
+        durationMs: episode["duration_ms"] ?? episode["duration"]?["totalMilliseconds"] ?? 0,
         isrc: "",
         artists: showName.isNotEmpty ? [{
           id: show["id"].toString(),
           name: showName,
           externalUri: "https://open.spotify.com/show/${show["id"]}",
-          images: show["images"] ?? [],
+          images: show["images"] ?? show["coverArt"]?["sources"] ?? [],
         }.toJson()] : [],
         album: {
           id: show?["id"]?.toString() ?? "",
           name: showName,
           externalUri: show != null ? "https://open.spotify.com/show/${show["id"]}" : "",
-          releaseDate: episode["release_date"] ?? "",
+          releaseDate: episode["release_date"] ?? episode["releaseDate"]?["isoString"] ?? "",
           releaseDatePrecision: "day",
-          images: show?["images"] ?? episode["images"] ?? [],
+          images: show?["images"] ?? show?["coverArt"]?["sources"] ?? episode["images"] ?? episode["coverArt"]?["sources"] ?? [],
           albumType: "podcast",
         }.toJson(),
         // 供 podcast 音源使用（Show→Album、Episode→Track 映射的自訂欄位）

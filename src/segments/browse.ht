@@ -19,25 +19,38 @@ class BrowseEndpoint {
         spTCookie: auth.credentials["cookies"].where((c)=>c["name"] == "sp_t").elementAt(0)["value"]
         limit: limit,
       ).then((sections){
-        return {
-          limit: limit ?? 20,
-          nextOffset: null,
-          hasMore: false,
-          total: sections.length,
-          items: sections.map((section) {            
-            var shows = section["items"].where((item) => item["objectType"] == "Show" || item["objectType"] == "Podcast").toList()
-            
-            return {
-              id: section["id"],
-              title: section["title"],
-              externalUri: section["external_urls"]["spotify"] ?? "https://open.spotify.com/section/${section["id"]}",
-              browseMore: true,
-              items: [
-                ...Converters.simpleShows(shows),
-              ],
-            }.toJson()
-          }).toList()
-        }.toJson()
+        var sectionsResult = sections.map((section) {            
+          var shows = section["items"].where((item) => item["objectType"] == "Show" || item["objectType"] == "Podcast").toList()
+          
+          return {
+            id: section["id"],
+            title: section["title"],
+            externalUri: section["external_urls"]["spotify"] ?? "https://open.spotify.com/section/${section["id"]}",
+            browseMore: true,
+            items: [
+              ...Converters.simpleShows(shows),
+            ],
+          }.toJson()
+        }).toList()
+
+        return client.show.savedShows(offset: 0, limit: 30).then((saved) {
+          return {
+            limit: limit ?? 20,
+            nextOffset: null,
+            hasMore: false,
+            total: sectionsResult.length,
+            items: [
+              {
+                id: "your-podcasts",
+                title: "你的 Podcast",
+                externalUri: "https://open.spotify.com/collection/podcasts",
+                browseMore: true,
+                items: Converters.simpleShows(saved["items"]),
+              }.toJson(),
+              ...sectionsResult,
+            ],
+          }.toJson()
+        })
       })
     })
   }
