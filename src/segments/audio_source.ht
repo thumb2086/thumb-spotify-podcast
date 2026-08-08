@@ -155,8 +155,10 @@ class PodcastAudioSourceEndpoint {
   fun matches(track: Map) -> List {
     var showName = track["showName"] ?? track["album"]?["name"] ?? ""
     var episodeTitle = track["episodeName"] ?? track["name"] ?? ""
+    print("[PodcastAudio] matches: showName=${showName}, episodeTitle=${episodeTitle}")
 
     return rssMatches(showName, episodeTitle).then((matches) {
+      print("[PodcastAudio] rssMatches returned ${matches.length} results")
       if (matches.isNotEmpty) {
         return matches
       }
