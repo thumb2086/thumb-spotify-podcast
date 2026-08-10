@@ -7,18 +7,18 @@ class TrackEndpoint {
   construct (this.client)
 
   fun getTrack(id: string) {
-    return client.track.getTrack(id).then((data) {
-      return Converters.fullTracks([data])[0]
+    return client.show.getEpisode(id).then((data) {
+      return Converters.fullEpisodes([data])[0]
     })
   }
 
   fun save(trackIds: List) async {
-    await client.track.save(trackIds)
+    await client.show.saveEpisodes(trackIds)
     return true
   }
 
   fun unsave(trackIds: List) async {
-    await client.track.unsave(trackIds)
+    await client.show.unsaveEpisodes(trackIds)
     return true
   }
 

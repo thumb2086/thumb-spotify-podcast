@@ -1,7 +1,7 @@
-import "module:spotube_plugin" as spotube_plugin
 import "module:std" as std
 
-var YouTubeEngine = spotube_plugin.YouTubeEngine
+import { SpotifyGqlApi } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
+
 var HttpClient = std.HttpClient
 var HttpResponse = std.HttpResponse
 var RequestOptions = std.RequestOptions
@@ -47,29 +47,14 @@ class PodcastConverter {
       episodeId: episode["trackId"],
     }.toJson()
   }
-
-  /// YouTube search result → Spotube match object（與 spotube-plugin-youtube-audio 同構）
-  static fun toYoutubeMatchObject(res: List) -> List<Map> {
-    return res.map((d){
-      return {
-        "id": d["id"],
-        "title": d["title"],
-        "artists": [d["author"]],
-        "duration": d["duration"],
-        "thumbnail": d["thumbnail"],
-        "externalUri": "https://youtube.com/watch?v=${d["id"]}",
-      }.toJson()
-    }).toList()
-  }
 }
 
 class PodcastAudioSourceEndpoint {
   var client: HttpClient
-  var yt: YouTubeEngine
+  var spotify: SpotifyGqlApi
 
-  construct () {
+  construct (this.spotify) {
     client = HttpClient()
-    yt = YouTubeEngine()
   }
 
   // List of containers and their supported qualities
@@ -77,15 +62,13 @@ class PodcastAudioSourceEndpoint {
     return [
       { type: "lossy", name: "mp3", qualities: [ { bitrate: 128000 }, { bitrate: 96000 } ] }.toJson(),
       { type: "lossy", name: "m4a", qualities: [ { bitrate: 128000 } ] }.toJson(),
-      { type: "lossy", name: "mp4", qualities: [ { bitrate: 256000 }, { bitrate: 128000 }, { bitrate: 96000 }, { bitrate: 44000 } ] }.toJson(),
-      { type: "lossy", name: "webm", qualities: [ { bitrate: 256000 }, { bitrate: 128000 }, { bitrate: 96000 }, { bitrate: 44000 } ] }.toJson(),
     ]
   }
 
-  /// 第一層：Apple/iTunes 直連音檔（參考 Playlist_Administrator 的 podcast 音源）
+  /// Apple/iTunes 直連音檔（參考 Playlist_Administrator 的 podcast 音源）
   /// 1. iTunes Search API 依節目名找 collectionId
   /// 2. iTunes Lookup entity=podcastEpisode 拿集數清單
-  /// 3. 依集數標題精準比對 → 回傳 episodeUrl（完整音檔）
+  /// 3. 依集數標題正規化比對 → 回傳 episodeUrl（完整音檔）
   fun rssMatches(showName: string, episodeTitle: string) -> List {
     if (showName.isEmpty || episodeTitle.isEmpty) {
       return []
@@ -139,70 +122,67 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// 第二層：YouTube 搜尋備援（參考 spotube-plugin-youtube-audio）
-  fun youtubeMatches(showName: string, episodeTitle: string) -> List {
+  /// 用 Spotify episode ID 補 show 名稱（搜尋結果的 track 沒有 show 資訊）
+  /// @returns Future<string>
+  fun resolveShowName(episodeId: string) -> string {
+    if (episodeId == null || episodeId.isEmpty) {
+      return ""
+    }
+
+    return spotify.show.getEpisode(episodeId).then((episode) {
+      var podcast = episode["podcastV2"]?["data"]
+      if (podcast == null) {
+        return ""
+      }
+      return podcast["name"]?.toString() ?? ""
+    })
+  }
+
+  /// 找出與給定 track（episode）相符的音源。永遠走 RSS/iTunes 直連。
+  /// showName 缺失時會用 Spotify episode ID 自動補齊。
+  /// @param track - Map<SpotubeTrackObject>
+  /// @returns Future<List<SpotubeAudioSourceMatchObject>>
+  fun matches(track: Map) -> List {
+    var episodeTitle = track["episodeName"] ?? track["name"] ?? ""
+    var episodeId = track["id"]
+
     if (episodeTitle.isEmpty) {
       return []
     }
 
-    var query = showName.isEmpty ? episodeTitle : "${episodeTitle} ${showName}"
-
-    return yt.search(query).then((res) {
-      return PodcastConverter.toYoutubeMatchObject(res)
-    })
-  }
-
-  /// 找出與給定 track（episode）相符的音源。
-  /// 優先 RSS/iTunes 直連，找不到再退回 YouTube。
-  /// @param track - Map<SpotubeTrackObject>
-  /// @returns Future<List<SpotubeAudioSourceMatchObject>>
-  fun matches(track: Map) -> List {
     var showName = track["showName"] ?? track["album"]?["name"] ?? ""
-    var episodeTitle = track["episodeName"] ?? track["name"] ?? ""
-    print("[PodcastAudio] showName=${showName}, title=${episodeTitle}")
 
-    if (showName.isEmpty || episodeTitle.isEmpty) {
-      return youtubeMatches(showName, episodeTitle)
+    if (showName.isEmpty && episodeId != null && !episodeId.isEmpty) {
+      return resolveShowName(episodeId).then((name: string) {
+        if (name.isEmpty) {
+          return []
+        }
+        return rssMatches(name, episodeTitle)
+      })
     }
 
-    return rssMatches(showName, episodeTitle).then((matches) {
-      print("[PodcastAudio] RSS returned ${matches.length} matches")
-      if (matches.isNotEmpty) {
-        return matches
-      }
-      return youtubeMatches(showName, episodeTitle)
-    })
+    return rssMatches(showName, episodeTitle)
   }
 
   /// 對給定的 match 回傳所有可用串流。
-  /// RSS 直連 match 直接回傳完整音檔 URL；YouTube match 走 streamManifest。
+  /// RSS 直連 match 直接回傳完整音檔 URL。
   /// @param match - Map<SpotubeAudioSourceStreamObject>
   /// @returns Future<List<SpotubeAudioSourceStreamObject>>
   fun streams(match: Map) -> List {
     var audioUrl = match["audioUrl"]
 
-    if (audioUrl != null && audioUrl.isNotEmpty) {
-      var container = PodcastConverter.guessContainer(audioUrl)
-      return [{
-        "url": audioUrl,
-        "container": container,
-        "type": "lossy",
-        "codec": PodcastConverter.guessCodec(container),
-        "bitrate": 128000,
-      }.toJson()]
+    if (audioUrl == null || audioUrl.isEmpty) {
+      return []
     }
 
-    return yt.streamManifest(match["id"]).then((manifest){
-      return manifest.map((stream){
-        return {
-          "url": stream["url"],
-          "container": stream["container"],
-          "type": "lossless",
-          "codec": "aac",
-          "bitrate": stream["bitrate"],
-        }.toJson()
-      }).toList()
-    })
+    var container = PodcastConverter.guessContainer(audioUrl)
+    return [{
+      "url": audioUrl,
+      "container": container,
+      "type": "lossy",
+      "codec": PodcastConverter.guessCodec(container),
+      "bitrate": 128000,
+    }.toJson()]
   }
 }
 

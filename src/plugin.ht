@@ -37,7 +37,7 @@ class SpotifyMetadataProviderPlugin {
   construct (){
     api = SpotifyGqlApi()
     auth = SpotifyAuthEndpoint()
-    audioSource = PodcastAudioSourceEndpoint()
+    audioSource = PodcastAudioSourceEndpoint(api)
 
     album = AlbumEndpoint(api)
     artist = ArtistEndpoint(api)
