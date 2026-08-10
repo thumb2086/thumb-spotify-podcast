@@ -1,25 +1,27 @@
 ﻿import "module:std" as std
 
-import { SpotifyGqlApi } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
+import { SpotifyAuthEndpoint } from "./auth.ht"
 
 var HttpClient = std.HttpClient
 var HttpResponse = std.HttpResponse
 var RequestOptions = std.RequestOptions
+var HttpBaseOptions = std.HttpBaseOptions
 var HttpResponseType = std.HttpResponseType
 
 class PodcastConverter {
-  /// 撠 Playlist_Administrator ??normalizeFileName嚗?  /// ?餅? ?岫?賬???蝑?蝬渲???摮???撠神嚗??璅?瘥?
+  /// Normalize episode title for fuzzy matching
   static fun normalizeName(name: string) -> string {
     if (name == null) return ""
     return name
-      .replaceAll(Regex("[?\[].*?[?\]]"), "")
+      .replaceAll(Regex("[【\\[].*?[】\\]]"), "")
       .replaceAll(Regex("[<>:\"/\\|?*&]"), "")
       .replaceAll(" ", "")
       .toLowerCase()
       .trim()
   }
 
-  /// ?? startTag ??endTag 銋??摰對???Playlist_Administrator ??RSS 閫??嚗?  static fun pickBetween(text: string, startTag: string, endTag: string) -> string {
+  /// Extract text between startTag and endTag (string-based RSS parsing)
+  static fun pickBetween(text: string, startTag: string, endTag: string) -> string {
     if (text == null) return ""
     var parts = text.split(startTag)
     if (parts.length < 2) return ""
@@ -29,7 +31,7 @@ class PodcastConverter {
     return eparts[0].trim()
   }
 
-  /// 閫?? RSS feed嚗???<item> ??title / enclosure url / itunes:duration
+  /// Parse RSS feed items: title / enclosure url / duration
   static fun parseRssFeed(xml: string) -> List {
     if (xml == null || xml.isEmpty) {
       return []
@@ -41,22 +43,19 @@ class PodcastConverter {
     for (var i = 1; i < items.length; i++) {
       var itemXml = items[i]
 
-      var title = pickBetween(itemXml, "<title>", "</title>")
+      var title = PodcastConverter.pickBetween(itemXml, "<title>", "</title>")
       title = title.replaceAll("<![CDATA[", "").replaceAll("]]>", "")
       title = title.replaceAll("&amp;", "&").trim()
 
-      var encTag = pickBetween(itemXml, "<enclosure", ">")
-      var audioUrl = pickBetween(encTag, 'url="', '"')
+      var encTag = PodcastConverter.pickBetween(itemXml, "<enclosure", ">")
+      var audioUrl = PodcastConverter.pickBetween(encTag, 'url="', '"')
       audioUrl = audioUrl.replaceAll("&amp;", "&")
 
       if (title.isEmpty || audioUrl.isEmpty) {
         continue
       }
 
-      var durationStr = pickBetween(itemXml, "<itunes:duration>", "</itunes:duration>")
-      if (durationStr.isEmpty) {
-        durationStr = pickBetween(itemXml, "itunes:duration", "/itunes:duration")
-      }
+      var durationStr = PodcastConverter.pickBetween(itemXml, "<itunes:duration>", "</itunes:duration>")
 
       result.add({
         index: i,
@@ -69,7 +68,7 @@ class PodcastConverter {
     return result
   }
 
-  /// itunes:duration嚗?HH:MM:SS" ??蝘???瘥怎?
+  /// itunes:duration ("HH:MM:SS" or plain seconds) -> milliseconds
   static fun durationToMs(d: string) -> int {
     if (d == null || d.isEmpty) return 0
     var parts = d.split(":")
@@ -99,7 +98,17 @@ class PodcastConverter {
     return "mp3"
   }
 
-  /// RSS episode ??Spotube match object嚗udioUrl ?箇????湧瑼?
+  /// Extract show name from getEpisodeOrChapter response (never throws)
+  static fun extractShowName(data) -> string {
+    if (data == null) return ""
+    var episode = data["data"]?["episodeUnionV2"]
+    if (episode == null) return ""
+    var podcast = episode["podcastV2"]?["data"]
+    if (podcast == null) return ""
+    return podcast["name"]?.toString() ?? ""
+  }
+
+  /// RSS episode -> Spotube match object (audioUrl is direct file)
   static fun toMatchObject(episode: Map, show: Map) -> Map {
     return {
       id: "rss:${show["collectionId"]}:${episode["index"]}",
@@ -115,10 +124,17 @@ class PodcastConverter {
 
 class PodcastAudioSourceEndpoint {
   var client: HttpClient
-  var spotify: SpotifyGqlApi
+  var safeClient: HttpClient
+  var auth: SpotifyAuthEndpoint
 
-  construct (this.spotify) {
+  construct (this.auth) {
     client = HttpClient()
+    // validateStatus always true: HTTP errors never throw, just return empty
+    safeClient = HttpClient(
+      HttpBaseOptions(
+        validateStatus: (status) => true
+      )
+    )
   }
 
   // List of containers and their supported qualities
@@ -129,8 +145,9 @@ class PodcastAudioSourceEndpoint {
     ]
   }
 
-  /// 靘??桀??? iTunes嚗???Playlist_Administrator嚗?憭望??郊蝮桃?迂?岫
-  /// 嚗?嚗??瘚?Tech.wav?? iTunes 0 蝑????嫘??瘚芥? ?賭葉嚗?  /// @returns Future<List<Map>> (podcast shows)
+  /// Search iTunes for the show's feedUrl, retrying with shorter names
+  /// (e.g. "科技浪 Tech.wav" -> 0 results -> "科技浪" -> hit)
+  /// @returns Future<List<Map>> (podcast shows)
   fun searchItunes(terms: List) -> List {
     if (terms.isEmpty) {
       return []
@@ -139,7 +156,7 @@ class PodcastAudioSourceEndpoint {
     var term = terms.join(" ")
     var searchUrl = "https://itunes.apple.com/search?term=${term}&media=podcast&limit=5"
 
-    return client.get_req(
+    return safeClient.get_req(
       searchUrl,
       options: RequestOptions(
         headers: {
@@ -165,13 +182,14 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// ?湔??RSS feed嚗???Playlist_Administrator嚗Tunes ?芣 feedUrl嚗??詨? RSS 閫??嚗?  /// @returns Future<List<Map>>
+  /// Fetch & parse RSS feed directly (Playlist_Administrator approach)
+  /// @returns Future<List<Map>>
   fun fetchRssEpisodes(feedUrl: string) -> List {
     if (feedUrl == null || feedUrl.isEmpty) {
       return []
     }
 
-    return client.get_req(
+    return safeClient.get_req(
       feedUrl,
       options: RequestOptions(
         responseType: HttpResponseType.plain,
@@ -184,10 +202,7 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// RSS ?湧?皞???Playlist_Administrator ?皞?蝔?
-  /// 1. iTunes Search API 依節目名找 feedUrl（失敗逐步縮短名稱）
-  /// 2. 直接抓 RSS XML 解析集數（title / enclosure audioUrl）
-  /// 3. 依集數標題正規化比對 → 回傳直連音檔
+  /// RSS audio source: iTunes -> feedUrl -> RSS parse -> title match -> direct audio
   fun rssMatches(showName: string, episodeTitle: string) -> List {
     if (showName.isEmpty || episodeTitle.isEmpty) {
       return []
@@ -225,46 +240,77 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// ??Spotify episode ID 鋆?show ?迂嚗?撠??? track 瘝? show 鞈?嚗?  /// @returns Future<string>
+  /// Resolve show name from Spotify episode ID via getEpisodeOrChapter.
+  /// Uses safeClient (never throws on HTTP errors).
+  /// @returns Future<string>
   fun resolveShowName(episodeId: string) -> string {
     if (episodeId == null || episodeId.isEmpty) {
       return ""
     }
+    if (auth.credentials == null) {
+      return ""
+    }
+    var token = auth.credentials["accessToken"]
+    if (token == null || token.isEmpty) {
+      return ""
+    }
 
-    return spotify.show.getEpisode(episodeId).then((episode) {
-      var podcast = episode["podcastV2"]?["data"]
-      if (podcast == null) {
-        return ""
+    var payload = {
+      "variables": { "uri": "spotify:episode:${episodeId}" },
+      "operationName": "getEpisodeOrChapter",
+      "extensions": {
+        "persistedQuery": {
+          "version": 1,
+          "sha256Hash": "3416929067571ac4b79db16716be3c6ea5f6265f7975a0ee94b1fc5ee1dc1e9d"
+        }
       }
-      return podcast["name"]?.toString() ?? ""
+    }.toJson()
+
+    return safeClient.post(
+      "https://api-partner.spotify.com/pathfinder/v2/query",
+      data: payload,
+      options: RequestOptions(
+        headers: {
+          "Authorization": "Bearer ${token}",
+          "app-platform": "WebPlayer",
+        }.toJson(),
+      ),
+    ).then((res: HttpResponse) {
+      return PodcastConverter.extractShowName(res.data)
     })
   }
 
-  /// ?曉?策摰?track嚗pisode嚗蝚衣??單??偶?粥 RSS ?湧??  /// showName 蝻箏仃????Spotify episode ID ?芸?鋆???  /// @param track - Map<SpotubeTrackObject>
+  /// Find audio source for the given track (episode). RSS only.
+  /// Resolves showName via Spotify API when the track lacks it.
+  /// @param track - Map<SpotubeTrackObject>
   /// @returns Future<List<SpotubeAudioSourceMatchObject>>
   fun matches(track: Map) -> List {
     var episodeTitle = track["episodeName"] ?? track["name"] ?? ""
     var episodeId = track["id"]
 
-    if (episodeTitle.isEmpty) {
+    if (episodeTitle == null || episodeTitle.isEmpty) {
       return []
     }
 
     var showName = track["showName"] ?? track["album"]?["name"] ?? ""
+    if (showName == null) {
+      showName = ""
+    }
 
     if (showName.isEmpty && episodeId != null && !episodeId.isEmpty) {
-      return resolveShowName(episodeId).then((name: string) {
-        if (name.isEmpty) {
+      return resolveShowName(episodeId).then((name) {
+        if (name == null || name.isEmpty) {
           return []
         }
-        return rssMatches(name, episodeTitle)
+        return rssMatches(name.toString(), episodeTitle)
       })
     }
 
     return rssMatches(showName, episodeTitle)
   }
 
-  /// 撠策摰? match ????其葡瘚?  /// RSS ?湧?match ?湔?摰?單? URL??  /// @param match - Map<SpotubeAudioSourceStreamObject>
+  /// Streams for the given match. RSS matches carry the direct audio URL.
+  /// @param match - Map<SpotubeAudioSourceStreamObject>
   /// @returns Future<List<SpotubeAudioSourceStreamObject>>
   fun streams(match: Map) -> List {
     var audioUrl = match["audioUrl"]
@@ -273,7 +319,7 @@ class PodcastAudioSourceEndpoint {
       return []
     }
 
-    var container = PodcastConverter.guessContainer(audioUrl)
+    var container = PodcastConverter.guessContainer(audioUrl.toString())
     return [{
       "url": audioUrl,
       "container": container,
