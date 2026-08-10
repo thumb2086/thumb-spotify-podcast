@@ -298,6 +298,9 @@ class Converters {
       }
 
       var show = episode["show"]
+      if(show == null) {
+        show = episode["podcastV2"]?["data"]
+      }
       var showId = show?["id"] ?? (show?["uri"] != null ? show["uri"].toString().split(":").last : "")
       var showName = show?["name"]?.toString() ?? ""
       var showImages = show != null ? Converters.extractList(show["images"]) : []

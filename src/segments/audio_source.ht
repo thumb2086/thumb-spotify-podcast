@@ -159,12 +159,14 @@ class PodcastAudioSourceEndpoint {
   fun matches(track: Map) -> List {
     var showName = track["showName"] ?? track["album"]?["name"] ?? ""
     var episodeTitle = track["episodeName"] ?? track["name"] ?? ""
+    print("[PodcastAudio] showName=${showName}, title=${episodeTitle}")
 
     if (showName.isEmpty || episodeTitle.isEmpty) {
       return youtubeMatches(showName, episodeTitle)
     }
 
     return rssMatches(showName, episodeTitle).then((matches) {
+      print("[PodcastAudio] RSS returned ${matches.length} matches")
       if (matches.isNotEmpty) {
         return matches
       }
