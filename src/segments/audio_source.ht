@@ -1,22 +1,87 @@
-import "module:std" as std
+﻿import "module:std" as std
 
 import { SpotifyGqlApi } from '../../dependencies/hetu_spotify_gql_client/lib/assets/hetu/spotify_gql_api_client.ht'
 
 var HttpClient = std.HttpClient
 var HttpResponse = std.HttpResponse
 var RequestOptions = std.RequestOptions
+var HttpResponseType = std.HttpResponseType
 
 class PodcastConverter {
-  /// 對照 Playlist_Administrator 的 normalizeFileName：
-  /// 去掉 【試聽】/【】 等前綴與非法字元、轉小寫，做集數標題比對
+  /// 撠 Playlist_Administrator ??normalizeFileName嚗?  /// ?餅? ?岫?賬???蝑?蝬渲???摮???撠神嚗??璅?瘥?
   static fun normalizeName(name: string) -> string {
     if (name == null) return ""
     return name
-      .replaceAll(Regex("[【\\[].*?[】\\]]"), "")
+      .replaceAll(Regex("[?\[].*?[?\]]"), "")
       .replaceAll(Regex("[<>:\"/\\|?*&]"), "")
       .replaceAll(" ", "")
       .toLowerCase()
       .trim()
+  }
+
+  /// ?? startTag ??endTag 銋??摰對???Playlist_Administrator ??RSS 閫??嚗?  static fun pickBetween(text: string, startTag: string, endTag: string) -> string {
+    if (text == null) return ""
+    var parts = text.split(startTag)
+    if (parts.length < 2) return ""
+    var tail = parts[1]
+    var eparts = tail.split(endTag)
+    if (eparts.isEmpty) return ""
+    return eparts[0].trim()
+  }
+
+  /// 閫?? RSS feed嚗???<item> ??title / enclosure url / itunes:duration
+  static fun parseRssFeed(xml: string) -> List {
+    if (xml == null || xml.isEmpty) {
+      return []
+    }
+
+    var items = xml.split("<item>")
+    var result = []
+
+    for (var i = 1; i < items.length; i++) {
+      var itemXml = items[i]
+
+      var title = pickBetween(itemXml, "<title>", "</title>")
+      title = title.replaceAll("<![CDATA[", "").replaceAll("]]>", "")
+      title = title.replaceAll("&amp;", "&").trim()
+
+      var encTag = pickBetween(itemXml, "<enclosure", ">")
+      var audioUrl = pickBetween(encTag, 'url="', '"')
+      audioUrl = audioUrl.replaceAll("&amp;", "&")
+
+      if (title.isEmpty || audioUrl.isEmpty) {
+        continue
+      }
+
+      var durationStr = pickBetween(itemXml, "<itunes:duration>", "</itunes:duration>")
+      if (durationStr.isEmpty) {
+        durationStr = pickBetween(itemXml, "itunes:duration", "/itunes:duration")
+      }
+
+      result.add({
+        index: i,
+        title: title,
+        audioUrl: audioUrl,
+        duration: PodcastConverter.durationToMs(durationStr),
+      }.toJson())
+    }
+
+    return result
+  }
+
+  /// itunes:duration嚗?HH:MM:SS" ??蝘???瘥怎?
+  static fun durationToMs(d: string) -> int {
+    if (d == null || d.isEmpty) return 0
+    var parts = d.split(":")
+    var total = 0
+    var mult = 1
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var seg = parts[i].trim()
+      if (seg.isEmpty) continue
+      total += int.parse(seg) * mult
+      mult *= 60
+    }
+    return total * 1000
   }
 
   static fun guessContainer(url: string) -> string {
@@ -34,17 +99,16 @@ class PodcastConverter {
     return "mp3"
   }
 
-  /// iTunes lookup 的 podcast episode → Spotube match object
+  /// RSS episode ??Spotube match object嚗udioUrl ?箇????湧瑼?
   static fun toMatchObject(episode: Map, show: Map) -> Map {
     return {
-      id: "rss:${show["collectionId"]}:${episode["trackId"]}",
-      title: episode["trackName"],
+      id: "rss:${show["collectionId"]}:${episode["index"]}",
+      title: episode["title"],
       artists: [show["collectionName"]],
-      duration: episode["trackTimeMillis"] ?? 0,
-      thumbnail: episode["artworkUrl600"] ?? show["artworkUrl600"] ?? "",
-      externalUri: episode["episodeUrl"],
-      audioUrl: episode["episodeUrl"],
-      episodeId: episode["trackId"],
+      duration: episode["duration"] ?? 0,
+      thumbnail: show["artworkUrl100"] ?? "",
+      externalUri: episode["audioUrl"],
+      audioUrl: episode["audioUrl"],
     }.toJson()
   }
 }
@@ -65,9 +129,8 @@ class PodcastAudioSourceEndpoint {
     ]
   }
 
-  /// 依節目名搜尋 iTunes，失敗時逐步縮短名稱重試
-  /// （例：「科技浪 Tech.wav」→ iTunes 0 筆 → 改「科技浪」→ 命中）
-  /// @returns Future<List<Map>> (podcast shows)
+  /// 靘??桀??? iTunes嚗???Playlist_Administrator嚗?憭望??郊蝮桃?迂?岫
+  /// 嚗?嚗??瘚?Tech.wav?? iTunes 0 蝑????嫘??瘚芥? ?賭葉嚗?  /// @returns Future<List<Map>> (podcast shows)
   fun searchItunes(terms: List) -> List {
     if (terms.isEmpty) {
       return []
@@ -86,7 +149,10 @@ class PodcastAudioSourceEndpoint {
     ).then((res: HttpResponse) {
       var results = res.data["results"] ?? []
 
-      var podcasts = results.where((r) => r["kind"] == "podcast").toList()
+      var podcasts = results
+        .where((r) => r["kind"] == "podcast" && r["feedUrl"] != null && r["feedUrl"].isNotEmpty)
+        .toList()
+
       if (podcasts.isNotEmpty) {
         return podcasts
       }
@@ -99,10 +165,29 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// Apple/iTunes 直連音檔（參考 Playlist_Administrator 的 podcast 音源）
-  /// 1. iTunes Search API 依節目名找 collectionId（失敗逐步縮短名稱）
-  /// 2. iTunes Lookup entity=podcastEpisode 拿集數清單
-  /// 3. 依集數標題正規化比對 → 回傳 episodeUrl（完整音檔）
+  /// ?湔??RSS feed嚗???Playlist_Administrator嚗Tunes ?芣 feedUrl嚗??詨? RSS 閫??嚗?  /// @returns Future<List<Map>>
+  fun fetchRssEpisodes(feedUrl: string) -> List {
+    if (feedUrl == null || feedUrl.isEmpty) {
+      return []
+    }
+
+    return client.get_req(
+      feedUrl,
+      options: RequestOptions(
+        responseType: HttpResponseType.plain,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }.toJson(),
+      ),
+    ).then((res: HttpResponse) {
+      return PodcastConverter.parseRssFeed(res.data)
+    })
+  }
+
+  /// RSS ?湧?皞???Playlist_Administrator ?皞?蝔?
+  /// 1. iTunes Search API 依節目名找 feedUrl（失敗逐步縮短名稱）
+  /// 2. 直接抓 RSS XML 解析集數（title / enclosure audioUrl）
+  /// 3. 依集數標題正規化比對 → 回傳直連音檔
   fun rssMatches(showName: string, episodeTitle: string) -> List {
     if (showName.isEmpty || episodeTitle.isEmpty) {
       return []
@@ -117,20 +202,14 @@ class PodcastAudioSourceEndpoint {
 
       var show = podcasts[0]
 
-      var lookupUrl = "https://itunes.apple.com/lookup?id=${show["collectionId"]}&entity=podcastEpisode&limit=200"
-
-      return client.get_req(lookupUrl).then((res: HttpResponse) {
-        var episodes = (res.data["results"] ?? [])
-          .where((e) => e["episodeUrl"] != null && e["episodeUrl"].isNotEmpty)
-          .toList()
-
+      return fetchRssEpisodes(show["feedUrl"]).then((episodes) {
         if (episodes.isEmpty) {
           return []
         }
 
         var targetEpisode = episodes.firstWhere(
           (e) {
-            var rssTitle = PodcastConverter.normalizeName(e["trackName"])
+            var rssTitle = PodcastConverter.normalizeName(e["title"])
             var searchTitle = PodcastConverter.normalizeName(episodeTitle)
             return rssTitle.contains(searchTitle) || searchTitle.contains(rssTitle)
           },
@@ -146,8 +225,7 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// 用 Spotify episode ID 補 show 名稱（搜尋結果的 track 沒有 show 資訊）
-  /// @returns Future<string>
+  /// ??Spotify episode ID 鋆?show ?迂嚗?撠??? track 瘝? show 鞈?嚗?  /// @returns Future<string>
   fun resolveShowName(episodeId: string) -> string {
     if (episodeId == null || episodeId.isEmpty) {
       return ""
@@ -162,9 +240,7 @@ class PodcastAudioSourceEndpoint {
     })
   }
 
-  /// 找出與給定 track（episode）相符的音源。永遠走 RSS/iTunes 直連。
-  /// showName 缺失時會用 Spotify episode ID 自動補齊。
-  /// @param track - Map<SpotubeTrackObject>
+  /// ?曉?策摰?track嚗pisode嚗蝚衣??單??偶?粥 RSS ?湧??  /// showName 蝻箏仃????Spotify episode ID ?芸?鋆???  /// @param track - Map<SpotubeTrackObject>
   /// @returns Future<List<SpotubeAudioSourceMatchObject>>
   fun matches(track: Map) -> List {
     var episodeTitle = track["episodeName"] ?? track["name"] ?? ""
@@ -188,9 +264,7 @@ class PodcastAudioSourceEndpoint {
     return rssMatches(showName, episodeTitle)
   }
 
-  /// 對給定的 match 回傳所有可用串流。
-  /// RSS 直連 match 直接回傳完整音檔 URL。
-  /// @param match - Map<SpotubeAudioSourceStreamObject>
+  /// 撠策摰? match ????其葡瘚?  /// RSS ?湧?match ?湔?摰?單? URL??  /// @param match - Map<SpotubeAudioSourceStreamObject>
   /// @returns Future<List<SpotubeAudioSourceStreamObject>>
   fun streams(match: Map) -> List {
     var audioUrl = match["audioUrl"]
