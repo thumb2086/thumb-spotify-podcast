@@ -122,7 +122,11 @@ class PodcastAudioSourceEndpoint {
         }
 
         var targetEpisode = episodes.firstWhere(
-          (e) => PodcastConverter.normalizeName(e["trackName"]) == PodcastConverter.normalizeName(episodeTitle),
+          (e) {
+            var rssTitle = PodcastConverter.normalizeName(e["trackName"])
+            var searchTitle = PodcastConverter.normalizeName(episodeTitle)
+            return rssTitle.contains(searchTitle) || searchTitle.contains(rssTitle)
+          },
           orElse: () => null
         )
 
