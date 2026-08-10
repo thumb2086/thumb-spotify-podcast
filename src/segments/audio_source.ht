@@ -65,16 +65,16 @@ class PodcastAudioSourceEndpoint {
     ]
   }
 
-  /// Apple/iTunes 直連音檔（參考 Playlist_Administrator 的 podcast 音源）
-  /// 1. iTunes Search API 依節目名找 collectionId
-  /// 2. iTunes Lookup entity=podcastEpisode 拿集數清單
-  /// 3. 依集數標題正規化比對 → 回傳 episodeUrl（完整音檔）
-  fun rssMatches(showName: string, episodeTitle: string) -> List {
-    if (showName.isEmpty || episodeTitle.isEmpty) {
+  /// 依節目名搜尋 iTunes，失敗時逐步縮短名稱重試
+  /// （例：「科技浪 Tech.wav」→ iTunes 0 筆 → 改「科技浪」→ 命中）
+  /// @returns Future<List<Map>> (podcast shows)
+  fun searchItunes(terms: List) -> List {
+    if (terms.isEmpty) {
       return []
     }
 
-    var searchUrl = "https://itunes.apple.com/search?term=${showName}&media=podcast&limit=5"
+    var term = terms.join(" ")
+    var searchUrl = "https://itunes.apple.com/search?term=${term}&media=podcast&limit=5"
 
     return client.get_req(
       searchUrl,
@@ -87,6 +87,30 @@ class PodcastAudioSourceEndpoint {
       var results = res.data["results"] ?? []
 
       var podcasts = results.where((r) => r["kind"] == "podcast").toList()
+      if (podcasts.isNotEmpty) {
+        return podcasts
+      }
+
+      var shorter = terms.sublist(0, terms.length - 1)
+      if (shorter.isEmpty) {
+        return []
+      }
+      return searchItunes(shorter)
+    })
+  }
+
+  /// Apple/iTunes 直連音檔（參考 Playlist_Administrator 的 podcast 音源）
+  /// 1. iTunes Search API 依節目名找 collectionId（失敗逐步縮短名稱）
+  /// 2. iTunes Lookup entity=podcastEpisode 拿集數清單
+  /// 3. 依集數標題正規化比對 → 回傳 episodeUrl（完整音檔）
+  fun rssMatches(showName: string, episodeTitle: string) -> List {
+    if (showName.isEmpty || episodeTitle.isEmpty) {
+      return []
+    }
+
+    var terms = showName.trim().split(" ")
+
+    return searchItunes(terms).then((podcasts) {
       if (podcasts.isEmpty) {
         return []
       }
